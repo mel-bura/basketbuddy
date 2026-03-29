@@ -1,27 +1,27 @@
 import { useState, useEffect, useRef } from "react";
+import { auth, googleProvider, db } from "./firebase";
+import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
 
-// âââ STORAGE HELPER âââ
+// ─── STORAGE HELPER (local fallback) ───
 const STORAGE_KEY = "basketbuddy_data";
-const loadData = () => {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch {}
+const loadLocal = () => {
+  try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) return JSON.parse(raw); } catch {}
   return null;
 };
-const saveData = (data) => {
+const saveLocal = (data) => {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch {}
 };
 
-// âââ CATEGORY DETECTION âââ
+// ─── CATEGORY DETECTION ───
 const CATEGORIES = {
   "Fruits & Veg": ["apple","banana","orange","lemon","lime","avocado","tomato","potato","onion","garlic","ginger","carrot","broccoli","spinach","lettuce","cucumber","pepper","chilli","mushroom","celery","corn","peas","beans","zucchini","courgette","aubergine","eggplant","cabbage","kale","beetroot","sweet potato","mango","strawberry","blueberry","raspberry","grape","pineapple","watermelon","peach","pear","plum","cherry","coconut","papaya","fig","pomegranate","asparagus","leek","spring onion","radish","parsnip","turnip","squash","pumpkin","herbs","basil","cilantro","coriander","parsley","mint","rosemary","thyme","dill","chive","salad","rocket","watercress","bok choy","fennel","artichoke","okra"],
-  "Meat & Fish": ["chicken","beef","pork","lamb","turkey","bacon","sausage","mince","steak","salmon","tuna","cod","prawn","shrimp","fish","ham","duck","veal","ribs","chorizo","pepperoni","salami","anchovy","sardine","mackerel","trout","crab","lobster","mussel","oyster","squid","brisket","fillet"],
-  "Dairy & Eggs": ["milk","cheese","butter","yogurt","yoghurt","cream","egg","eggs","cheddar","mozzarella","parmesan","feta","brie","camembert","ricotta","cottage cheese","sour cream","cream cheese","whipping cream","double cream","single cream","buttermilk","ghee","margarine","gouda","halloumi"],
-  "Bakery": ["bread","roll","baguette","croissant","muffin","bagel","tortilla","wrap","pita","pitta","naan","flatbread","sourdough","brioche","ciabatta","focaccia","crumpet","english muffin","pancake","waffle","scone","cake","pastry","doughnut","donut"],
-  "Pantry": ["rice","pasta","noodle","flour","sugar","salt","oil","olive oil","vegetable oil","coconut oil","sesame oil","vinegar","soy sauce","ketchup","mustard","mayonnaise","hot sauce","sriracha","worcestershire","stock","broth","bouillon","tomato paste","tomato sauce","passata","coconut milk","peanut butter","jam","honey","maple syrup","nutella","cereal","oats","oatmeal","granola","baking powder","baking soda","yeast","cornstarch","cocoa","chocolate","vanilla","cinnamon","cumin","paprika","turmeric","oregano","chili flakes","curry","garam masala","bay leaf","quinoa","couscous","lentil","chickpea","black bean","kidney bean","canned","tinned","taco","seasoning","spice","breadcrumb"],
+  "Meat & Fish": ["chicken","beef","pork","lamb","turkey","bacon","sausage","mince","steak","salmon","tuna","cod","prawn","shrimp","fish","ham","duck","veal","ribs","chorizo","pepperoni","salami","anchovy","sardine","mackerel","trout","crab","lobster","mussel","oyster","squid","brisket","fillet","vegan chicken","vegan"],
+  "Dairy & Eggs": ["milk","cheese","butter","yogurt","yoghurt","cream","egg","eggs","cheddar","mozzarella","parmesan","feta","brie","camembert","ricotta","cottage cheese","sour cream","cream cheese","whipping cream","double cream","single cream","buttermilk","ghee","margarine","gouda","halloumi","plant milk","vegan butter"],
+  "Bakery": ["bread","roll","baguette","croissant","muffin","bagel","tortilla","wrap","pita","pitta","naan","flatbread","sourdough","brioche","ciabatta","focaccia","crumpet","english muffin","pancake","waffle","scone","cake","pastry","doughnut","donut","puff pastry"],
+  "Pantry": ["rice","pasta","noodle","flour","sugar","salt","oil","olive oil","vegetable oil","coconut oil","sesame oil","vinegar","soy sauce","ketchup","mustard","mayonnaise","hot sauce","sriracha","worcestershire","stock","broth","bouillon","tomato paste","tomato sauce","passata","coconut milk","peanut butter","jam","honey","maple syrup","nutella","cereal","oats","oatmeal","granola","baking powder","baking soda","yeast","cornstarch","cocoa","chocolate","vanilla","cinnamon","cumin","paprika","turmeric","oregano","chili flakes","curry","garam masala","bay leaf","quinoa","couscous","lentil","chickpea","black bean","kidney bean","canned","tinned","taco","seasoning","spice","breadcrumb","poultry seasoning","kosher salt","white wine"],
   "Frozen": ["frozen","ice cream","pizza","chips","fries","nuggets","popsicle","ice","sorbet","frozen veg","frozen fruit","frozen meal","fish fingers","frozen berries","gelato","frozen peas"],
-  "Drinks": ["water","juice","soda","cola","beer","wine","coffee","tea","smoothie","lemonade","energy drink","sparkling","tonic","kombucha","oat milk","almond milk","soy milk","coconut water","squash","cordial"],
+  "Drinks": ["water","juice","soda","cola","beer","wine","coffee","tea","smoothie","lemonade","energy drink","sparkling","tonic","kombucha","oat milk","almond milk","soy milk","coconut water","squash","cordial","unsweetened plant milk"],
   "Snacks": ["crisps","crackers","popcorn","nuts","almonds","cashew","walnut","peanut","pistachio","trail mix","granola bar","protein bar","biscuit","cookie","candy","sweet","chocolate bar","gummy","pretzel","rice cake","dried fruit","raisins"],
   "Household": ["toilet paper","paper towel","trash bag","bin bag","detergent","dish soap","washing up liquid","sponge","bleach","cleaner","soap","shampoo","conditioner","toothpaste","toothbrush","deodorant","lotion","tissues","cling film","foil","aluminium foil","ziplock","plastic bag","candle","light bulb","battery","laundry","fabric softener","disinfectant","wipes"],
   "Other": []
@@ -50,19 +50,11 @@ const CATEGORY_COLORS = {
   "Drinks": "#3b82f6", "Snacks": "#f97316", "Household": "#6b7280", "Other": "#a855f7"
 };
 
-// âââ MEAL PLAN TAB âââ
-function MealPlanTab({ addItem }) {
+// ─── MEAL PLAN TAB ───
+function MealPlanTab({ addItem, meals, setMeals }) {
   const DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"];
-  const [meals, setMeals] = useState(() => {
-    try { const s = localStorage.getItem("basketbuddy_meals"); if (s) return JSON.parse(s); } catch {}
-    return DAYS.reduce((a, d) => { a[d] = { breakfast: "", lunch: "", dinner: "" }; return a; }, {});
-  });
   const [mealIngredients, setMealIngredients] = useState("");
   const [selectedDay, setSelectedDay] = useState(null);
-
-  useEffect(() => {
-    try { localStorage.setItem("basketbuddy_meals", JSON.stringify(meals)); } catch {}
-  }, [meals]);
 
   return (
     <div className="space-y-4">
@@ -81,7 +73,7 @@ function MealPlanTab({ addItem }) {
               {["breakfast","lunch","dinner"].map(type => (
                 <div key={type}>
                   <label className="text-[10px] uppercase tracking-wider text-gray-400 font-medium">{type}</label>
-                  <input value={meals[day][type]} onChange={(e) => setMeals(prev => ({ ...prev, [day]: { ...prev[day], [type]: e.target.value } }))} placeholder={`${type}...`} className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-gray-50" />
+                  <input value={meals[day]?.[type] || ""} onChange={(e) => setMeals(prev => ({ ...prev, [day]: { ...prev[day], [type]: e.target.value } }))} placeholder={`${type}...`} className="w-full mt-0.5 px-2 py-1.5 text-xs border border-gray-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-gray-50" />
                 </div>
               ))}
             </div>
@@ -100,9 +92,11 @@ function MealPlanTab({ addItem }) {
   );
 }
 
-// âââ MAIN APP âââ
+// ─── MAIN APP ───
 export default function BasketBuddy() {
-  const [items, setItems] = useState(() => { const s = loadData(); return s?.items || []; });
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [items, setItems] = useState(() => { const s = loadLocal(); return s?.items || []; });
   const [activeTab, setActiveTab] = useState("list");
   const [inputValue, setInputValue] = useState("");
   const [showPaste, setShowPaste] = useState(false);
@@ -113,13 +107,87 @@ export default function BasketBuddy() {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  const [budget, setBudget] = useState(() => { const s = loadData(); return s?.budget || ""; });
+  const [budget, setBudget] = useState(() => { const s = loadLocal(); return s?.budget || ""; });
   const [showBudget, setShowBudget] = useState(false);
   const [undoStack, setUndoStack] = useState([]);
+  const [syncStatus, setSyncStatus] = useState("");
+  const [meals, setMeals] = useState(() => {
+    try { const s = localStorage.getItem("basketbuddy_meals"); if (s) return JSON.parse(s); } catch {}
+    return ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"].reduce((a, d) => { a[d] = { breakfast: "", lunch: "", dinner: "" }; return a; }, {});
+  });
   const inputRef = useRef(null);
   const pasteRef = useRef(null);
+  const skipNextSync = useRef(false);
 
-  useEffect(() => { saveData({ items, budget }); }, [items, budget]);
+  // ─── AUTH STATE ───
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  // ─── FIRESTORE REAL-TIME SYNC (listen) ───
+  useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
+      if (snap.exists() && !skipNextSync.current) {
+        const data = snap.data();
+        if (data.items) setItems(data.items);
+        if (data.budget !== undefined) setBudget(data.budget);
+        if (data.meals) setMeals(data.meals);
+        setSyncStatus("synced");
+      }
+      skipNextSync.current = false;
+    });
+    return unsub;
+  }, [user]);
+
+  // ─── SAVE TO FIRESTORE + LOCAL ───
+  useEffect(() => {
+    saveLocal({ items, budget });
+    if (user) {
+      skipNextSync.current = true;
+      setSyncStatus("saving...");
+      const timeout = setTimeout(() => {
+        setDoc(doc(db, "users", user.uid), { items, budget, meals, updatedAt: new Date().toISOString() }, { merge: true })
+          .then(() => setSyncStatus("synced"))
+          .catch(() => setSyncStatus("error"));
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [items, budget, user]);
+
+  // ─── SAVE MEALS ───
+  useEffect(() => {
+    try { localStorage.setItem("basketbuddy_meals", JSON.stringify(meals)); } catch {}
+    if (user) {
+      skipNextSync.current = true;
+      const timeout = setTimeout(() => {
+        setDoc(doc(db, "users", user.uid), { meals, updatedAt: new Date().toISOString() }, { merge: true }).catch(() => {});
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [meals, user]);
+
+  // ─── AUTH ACTIONS ───
+  const handleSignIn = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      // After sign-in, push local data to cloud if cloud is empty
+      const localData = loadLocal();
+      if (localData?.items?.length > 0) {
+        await setDoc(doc(db, "users", result.user.uid), { items: localData.items, budget: localData.budget || "", meals, updatedAt: new Date().toISOString() }, { merge: true });
+      }
+    } catch (err) {
+      console.error("Sign-in error:", err);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try { await signOut(auth); setSyncStatus(""); } catch {}
+  };
 
   const addItem = (name, qty = "") => {
     const trimmed = name.trim();
@@ -163,7 +231,7 @@ export default function BasketBuddy() {
       line = line.replace(/^[\s\-\*\u2022\u2023\u25E6\u2043\u2219]+/, "").trim().replace(/^\d+[\.\)]\s*/, "").trim();
       if (!line) return null;
       let qty = "", name = line;
-      const qtyMatch = line.match(/^([\d\.\,\/\u00BD\u2153\u2154\u00BC\u00BE\u215B]+\s*(?:cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|litres?|l|pints?|bunch|bunches|cloves?|heads?|cans?|tins?|packets?|packs?|bags?|boxes?|bottles?|jars?|pieces?|slices?|fillets?|stalks?|sprigs?|handfuls?|pinch(?:es)?|large|medium|small|x)?)\s+(.+)/i);
+      const qtyMatch = line.match(/^([\d\.\,\/\u00BD\u2153\u2154\u00BC\u00BE\u215B]+\s*(?:cups?|tbsp|tsp|tablespoons?|teaspoons?|oz|ounces?|lbs?|pounds?|g|grams?|kg|ml|liters?|litres?|l|pints?|bunch|bunches|cloves?|heads?|cans?|tins?|packets?|packs?|bags?|boxes?|bottles?|jars?|pieces?|slices?|fillets?|stalks?|sprigs?|handfuls?|pinch(?:es)?|large|medium|small|x|sheets?)?)\s+(.+)/i);
       if (qtyMatch) { qty = qtyMatch[1].trim(); name = qtyMatch[2].trim(); }
       else { const numMatch = line.match(/^(\d+)\s+(.+)/); if (numMatch) { qty = numMatch[1]; name = numMatch[2]; } }
       return name ? { name, qty } : null;
@@ -242,6 +310,10 @@ export default function BasketBuddy() {
     );
   };
 
+  if (authLoading) {
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center"><div className="text-center"><span className="text-4xl block mb-3">{"\u{1F6D2}"}</span><p className="text-gray-400 text-sm">Loading...</p></div></div>;
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
@@ -255,8 +327,24 @@ export default function BasketBuddy() {
               {undoStack.length > 0 && <button onClick={undo} className="text-xs text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 px-2.5 py-1.5 rounded-lg transition-all flex items-center gap-1"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Undo</button>}
               <button onClick={() => setShowSearch(!showSearch)} className={`p-2 rounded-lg transition-all ${showSearch ? "bg-emerald-100 text-emerald-600" : "text-gray-400 hover:bg-gray-100"}`}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
               <button onClick={() => setShowBudget(!showBudget)} className={`p-2 rounded-lg transition-all ${showBudget ? "bg-emerald-100 text-emerald-600" : "text-gray-400 hover:bg-gray-100"}`}><span className="text-sm font-medium">{"\u00A3"}</span></button>
+              {/* Auth button */}
+              {user ? (
+                <button onClick={handleSignOut} className="flex items-center gap-1.5 px-2 py-1 rounded-lg hover:bg-gray-100 transition-all" title={`Signed in as ${user.email}\nClick to sign out`}>
+                  <img src={user.photoURL} alt="" className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
+                  {syncStatus === "synced" && <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>}
+                  {syncStatus === "saving..." && <span className="w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></span>}
+                  {syncStatus === "error" && <span className="w-2 h-2 bg-red-400 rounded-full"></span>}
+                </button>
+              ) : (
+                <button onClick={handleSignIn} className="text-xs text-white bg-emerald-500 hover:bg-emerald-600 px-3 py-1.5 rounded-lg transition-all font-medium">Sign in</button>
+              )}
             </div>
           </div>
+          {!user && (
+            <div className="pb-2">
+              <p className="text-xs text-amber-600 bg-amber-50 px-3 py-1.5 rounded-lg">Sign in with Google to sync your list across all devices</p>
+            </div>
+          )}
           {showSearch && <div className="pb-3"><input autoFocus value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search items..." className="w-full px-3 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent" /></div>}
           {showBudget && <div className="pb-3 flex items-center gap-3"><div className="flex items-center gap-2 flex-1"><span className="text-xs text-gray-500">Budget:</span><input type="number" value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="0.00" className="w-24 px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></div>{budgetNum > 0 && <div className="flex items-center gap-3 text-xs"><span className="text-gray-500">Spent: <b className="text-gray-700">{"\u00A3"}{totalSpent.toFixed(2)}</b></span><span className={budgetRemaining < 0 ? "text-red-500 font-bold" : "text-emerald-600 font-bold"}>{budgetRemaining >= 0 ? `\u00A3${budgetRemaining.toFixed(2)} left` : `\u00A3${Math.abs(budgetRemaining).toFixed(2)} over!`}</span></div>}</div>}
           <div className="flex gap-1 -mb-px">
@@ -332,7 +420,7 @@ export default function BasketBuddy() {
           </div>
         )}
 
-        {activeTab === "meals" && <MealPlanTab addItem={addItem} />}
+        {activeTab === "meals" && <MealPlanTab addItem={addItem} meals={meals} setMeals={setMeals} />}
       </div>
 
       {activeTab === "list" && <div className="fixed bottom-6 right-6 z-50"><button onClick={() => { inputRef.current?.focus(); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="w-14 h-14 bg-emerald-500 text-white rounded-2xl shadow-lg hover:bg-emerald-600 transition-all flex items-center justify-center text-2xl hover:scale-105">+</button></div>}
